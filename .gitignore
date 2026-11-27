@@ -1,0 +1,7 @@
+out/
+bin/
+obj/
+*.xbe
+*.iso
+datafiles/*
+!datafiles/README.md
