@@ -13192,6 +13192,9 @@ L953E: /* 38206 OR A             Has Willy collected all the items? */
 L953F: /* 38207 JR NZ,38262      Jump if so */
     INTCHECK(0x953F);
     VERIFY(0x953F, 0x20);
+    if (mem[0x953F] == 0x18) { /* variant: JR 38262 (original: JR NZ,38262) */
+        FETCH(0x953F); IMM(0x9540); JRTAKEN(0x9540); goto L9576;
+    }
     FETCH(0x953F);
     IMM(0x9540);
     if (!(F&FZ)) { JRTAKEN(0x9540); goto L9576; }

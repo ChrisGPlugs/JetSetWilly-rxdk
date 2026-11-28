@@ -347,6 +347,7 @@ static const struct { const char *name; uint16_t addr; uint8_t on, off; } cheats
     { "Infinite lives",    35899,   0,  53 },
     { "Infinite time",     35408,  24,  32 },
     { "Superjump",         36404,  44, 188 },
+    { "Deal with Maria",   38207,  24,  32 },     /* no Maria: bedroom open */
 };
 #define N_CHEATS (int)(sizeof cheats / sizeof cheats[0])
 #define MENU_ROWS 11                    /* room menu: rooms shown at once */
@@ -441,7 +442,7 @@ static void menu_draw(uint32_t *dst)
         }
     } else {
         for (int i = 0; i < N_CHEATS; i++) {
-            snprintf(line, sizeof line, " %d %-28s %-4s ", i + 1, cheats[i].name, cheat_on(i) ? "ON" : "off");
+            snprintf(line, sizeof line, "%2d %-28s %-4s ", i + 1, cheats[i].name, cheat_on(i) ? "ON" : "off");
             draw_text(dst, ZX_SCREEN_W, x, y + 16 + i * 8, line,
                       i == menu_sel ? hi_fg : fg, i == menu_sel ? hi_bg : bg);
         }

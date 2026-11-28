@@ -32,7 +32,8 @@ Each entry is one of the well-known POKEs, applied to the game's memory as on a 
 (48K and 128 alike): Gentle guardians (POKE 37392,0), Nice nasties (38447,201),
 Agreeable arrows (37505,24), Harmless heights (36578,16), No conveyors (36601,0),
 Cheat mode (34275,10, the same as typing WRITETYPER), Infinite lives (35899,0),
-Infinite time (35408,24) and Superjump (36404,44: hold jump to keep rising).
+Infinite time (35408,24), Superjump (36404,44: hold jump to keep rising) and Deal with Maria
+(38207,24: no Maria, so the bedroom is open without collecting the items).
 
 With cheat mode on, **White** opens the room menu: D-pad up / down by one room, left / right
 by ten, A to teleport there (the game's own teleport, so Willy keeps his place on the screen

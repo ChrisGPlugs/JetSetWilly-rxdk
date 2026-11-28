@@ -48,7 +48,8 @@ try {
         '--variant', '36601:0',          # No conveyors: NOP
         '--variant', '35899:0',          # Infinite lives: NOP
         '--variant', '35408:24',         # Infinite time: JR
-        '--variant', '36403:194,44,143'  # Superjump: POKE 36404,44 (JP NZ,36652)
+        '--variant', '36403:194,44,143', # Superjump: POKE 36404,44 (JP NZ,36652)
+        '--variant', '38207:24'          # Deal with Maria: JR
     )
     $hooks48  = '34620 34631 34762 35068 35245 35914 35696 34463'.Split(' ') | ForEach-Object { '--hook', $_ }
     $hooks128 = '34762 35068 35245 35914 35696'.Split(' ') | ForEach-Object { '--hook', $_ }
