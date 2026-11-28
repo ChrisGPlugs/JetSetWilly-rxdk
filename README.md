@@ -18,7 +18,7 @@ With both, a chooser appears on the 48K title screen.
 | Start | Start game (title); pause (in play) |
 | X | Pause · Y: tune on/off |
 | Back | In play: END GAME? (A yes, B no); twice on a title screen: back to the chooser |
-| White / Black | Type WRITETYPER; with the cheat on, teleport to previous / next room |
+| White / Black | Type WRITETYPER (only where the original accepts it: First Landing, standing on the floor at the foot of the stairs); with the cheat on, teleport to previous / next room |
 | Left-stick click | Diagnostics overlay |
 | Right-stick click | 4:3 / 16:9 (saved) |
 | LT + RT + Back + Start (or Black) | Return to the dashboard |
