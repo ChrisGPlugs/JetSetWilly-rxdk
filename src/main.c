@@ -329,12 +329,126 @@ static uint8_t teleport_in_filter(uint16_t port, uint8_t v)
     return v;
 }
 
-static void start_teleport(int forward)
+/* ------------------------------------------------------------------------ */
+/* Cheat menu (Black) and room menu (White, with the cheat on)              */
+/* ------------------------------------------------------------------------ */
+/* The well-known POKEs. Those that change an opcode or a jump target work
+ * because tools/Regen-Code.ps1 builds both decodings into the translated
+ * code (--variant); the others change data or an operand, which the
+ * translated code reads from memory anyway. Same addresses in 48K and 128.
+ * A POKE is on while the byte holds its POKEd value. */
+static const struct { const char *name; uint16_t addr; uint8_t on, off; } cheats[] = {
+    { "Gentle guardians",  37392,   0,   1 },
+    { "Nice nasties",      38447, 201,  58 },
+    { "Agreeable arrows",  37505,  24,  32 },
+    { "Harmless heights",  36578,  16,  12 },
+    { "No conveyors",      36601,   0,  95 },
+    { "Cheat mode",        34275,  10,   0 },     /* = WRITETYPER typed */
+    { "Infinite lives",    35899,   0,  53 },
+    { "Infinite time",     35408,  24,  32 },
+    { "Superjump",         36404,  44, 188 },
+};
+#define N_CHEATS (int)(sizeof cheats / sizeof cheats[0])
+#define MENU_ROWS 11                    /* room menu: rooms shown at once */
+
+enum { MENU_ROOMS = 1, MENU_CHEATS = 2 };
+static int menu;                        /* 0 none, MENU_ROOMS, MENU_CHEATS */
+static int menu_sel, menu_close_button, menu_dirty, menu_teleport = -1, cheat_sel;
+
+static void draw_text(uint32_t *dst, int pitch, int x, int y, const char *s, uint32_t fg, uint32_t bg);
+
+static int cheat_on(int i) { return mem[cheats[i].addr] == cheats[i].on; }
+
+/* Room names come from the game's own room data: 48K rooms at 49152, 128
+ * rooms in banks 1 (0-63), 3 (64-127) and 4 (128-129); the name is bytes
+ * 128-159 of each 256-byte room. */
+static void room_name(int r, char *out)
 {
-    if (mem[JSW_TELEPORT] != CHEAT_DONE) return;
-    teleport_target = (mem[JSW_ROOM] + (forward ? 1 : JSW_ROOMS - 1)) % JSW_ROOMS;
-    teleport_pending = 1;
-    teleport_frames = 0;
+    const uint8_t *p;
+    if (!v128) p = &mem[49152 + r * 256 + 128];
+    else p = zx_bank_ptr(r < 64 ? 1 : r < 128 ? 3 : 4) + (r % 64) * 256 + 128;
+    int a = 0, n = 32;                  /* names are centred: trim both ends */
+    while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == 0)) n--;
+    while (a < n && p[a] == ' ') a++;
+    for (int i = a; i < n; i++) out[i - a] = (p[i] >= 32 && p[i] < 127) ? (char)p[i] : '?';
+    out[n - a] = 0;
+}
+
+static void menu_open(int which, int button)
+{
+    menu = which;
+    menu_close_button = button;
+    menu_sel = which == MENU_ROOMS ? mem[JSW_ROOM] % JSW_ROOMS : cheat_sel;
+    menu_dirty = 1;
+    memset(pad_keys, 0, sizeof pad_keys);
+    macro_step = -1;
+    plat_log("JSW SCREEN %s\n", which == MENU_ROOMS ? "rooms" : "cheats");
+}
+
+static void menu_button(int button)
+{
+    int n = menu == MENU_ROOMS ? JSW_ROOMS : N_CHEATS;
+    int page = menu == MENU_ROOMS ? 10 : n;
+    menu_dirty = 1;
+    if (menu == MENU_CHEATS) cheat_sel = menu_sel;
+    switch (button) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:    menu_sel = (menu_sel + n - 1) % n; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:  menu_sel = (menu_sel + 1) % n; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:  menu_sel = menu_sel >= page ? menu_sel - page : 0; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: menu_sel = menu_sel + page < n ? menu_sel + page : n - 1; break;
+    case SDL_GAMEPAD_BUTTON_SOUTH:                                    /* A */
+        if (menu == MENU_ROOMS) {
+            menu_teleport = menu_sel;
+            menu = 0;
+        } else {
+            int on = !cheat_on(menu_sel);
+            mem[cheats[menu_sel].addr] = on ? cheats[menu_sel].on : cheats[menu_sel].off;
+            plat_log("JSW: cheat %s %s\n", cheats[menu_sel].name, on ? "on" : "off");
+        }
+        break;
+    case SDL_GAMEPAD_BUTTON_EAST:                                     /* B */
+    case SDL_GAMEPAD_BUTTON_BACK:
+        menu = 0;
+        break;
+    default:
+        if (button == menu_close_button) menu = 0;                    /* same shoulder */
+        break;
+    }
+    if (menu == MENU_CHEATS) cheat_sel = menu_sel;
+}
+
+static void menu_draw(uint32_t *dst)
+{
+    char line[64];
+    const uint32_t fg = 0xFFFFFFFF, bg = 0xFF0000A0, hi_fg = 0xFF000000, hi_bg = 0xFFFFFF00;
+    const int w = 37, x = (ZX_SCREEN_W - 8 * w) / 2;   /* room names are up to 32 */
+    int rows = menu == MENU_ROOMS ? MENU_ROWS : N_CHEATS;
+    int y = (ZX_SCREEN_H - 8 * (rows + 4)) / 2;
+    snprintf(line, sizeof line, " %-35s ", menu == MENU_ROOMS ? "TELEPORT TO ROOM" : "CHEATS (POKES)");
+    draw_text(dst, ZX_SCREEN_W, x, y, line, fg, bg);
+    draw_text(dst, ZX_SCREEN_W, x, y + 8, "                                     ", fg, bg);
+    if (menu == MENU_ROOMS) {
+        int first = menu_sel - MENU_ROWS / 2;
+        if (first > JSW_ROOMS - MENU_ROWS) first = JSW_ROOMS - MENU_ROWS;
+        if (first < 0) first = 0;
+        for (int i = 0; i < MENU_ROWS; i++) {
+            int r = first + i;
+            char name[33];
+            room_name(r, name);
+            snprintf(line, sizeof line, "%3d %-32.32s%c", r, name, r == mem[JSW_ROOM] ? '*' : ' ');
+            draw_text(dst, ZX_SCREEN_W, x, y + 16 + i * 8, line,
+                      r == menu_sel ? hi_fg : fg, r == menu_sel ? hi_bg : bg);
+        }
+    } else {
+        for (int i = 0; i < N_CHEATS; i++) {
+            snprintf(line, sizeof line, " %d %-28s %-4s ", i + 1, cheats[i].name, cheat_on(i) ? "ON" : "off");
+            draw_text(dst, ZX_SCREEN_W, x, y + 16 + i * 8, line,
+                      i == menu_sel ? hi_fg : fg, i == menu_sel ? hi_bg : bg);
+        }
+    }
+    draw_text(dst, ZX_SCREEN_W, x, y + 16 + rows * 8, "                                     ", fg, bg);
+    draw_text(dst, ZX_SCREEN_W, x, y + 24 + rows * 8,
+              menu == MENU_ROOMS ? " A go  B back  D-pad <> 10 rooms     " : " A on/off  B back                    ", fg, bg);
 }
 
 static void game_hook(uint16_t addr)
@@ -395,7 +509,8 @@ static void vol_report(const char *why)
 /* Pad layout as in the nxdk port, plus right-stick click = 4:3 / 16:9. */
 static void pad_button(int button, int down)
 {
-    if (down && triggers_held && (button == SDL_GAMEPAD_BUTTON_START || button == SDL_GAMEPAD_BUTTON_BACK))
+    if (down && triggers_held && (button == SDL_GAMEPAD_BUTTON_START || button == SDL_GAMEPAD_BUTTON_BACK ||
+                                  button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
         return;                                  /* IGR combo in progress */
     if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) { if (down) aspect_toggle(); return; }
     if (button == SDL_GAMEPAD_BUTTON_LEFT_STICK)  { if (down) diag_on = !diag_on; return; }
@@ -412,6 +527,10 @@ static void pad_button(int button, int down)
             if (button == SDL_GAMEPAD_BUTTON_SOUTH) confirm_quit = 2;
             else if (button == SDL_GAMEPAD_BUTTON_EAST || button == SDL_GAMEPAD_BUTTON_BACK) confirm_quit = 3;
         }
+        return;
+    }
+    if (menu) {
+        if (down) menu_button(button);
         return;
     }
     if (button == SDL_GAMEPAD_BUTTON_BACK && down && chooser_available && jsw_in_title) {
@@ -453,15 +572,13 @@ static void pad_button(int button, int down)
         set_bit(pad_keys, ZX_ROW_SPACE_B, 0, down);
         break;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:                 /* White */
+        if (!down || !in_play) break;
+        if (mem[JSW_TELEPORT] == CHEAT_DONE) menu_open(MENU_ROOMS, button);
+        else if (macro_step < 0 && cheat_spot()) { macro_step = 0; macro_timer = 0; }
+        else if (macro_step < 0) plat_log("JSW: cheat only works in First Landing at the foot of the stairs (room %d, y %d)\n", mem[JSW_ROOM], mem[JSW_WILLY_Y]);
+        break;
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:                /* Black */
-        if (down) {
-            if (mem[JSW_TELEPORT] != CHEAT_DONE) {
-                if (macro_step < 0 && cheat_spot()) { macro_step = 0; macro_timer = 0; }
-                else if (macro_step < 0) plat_log("JSW: cheat only works in First Landing at the foot of the stairs (room %d, y %d)\n", mem[JSW_ROOM], mem[JSW_WILLY_Y]);
-            } else {
-                start_teleport(button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-            }
-        }
+        if (down && in_play) menu_open(MENU_CHEATS, button);
         break;
     default:
         break;
@@ -598,10 +715,16 @@ static void present(void)
     static int last_confirm;
     int confirm_changed = (confirm_quit == 1) != last_confirm;
     last_confirm = confirm_quit == 1;
-    if (!screen_changed(flash) && !diag_on && !msg && !clear_msg && !label_changed && !confirm_changed) return;
+    static int last_menu;
+    int menu_changed = menu_dirty || menu != last_menu;
+    menu_dirty = 0;
+    last_menu = menu;
+    if (!screen_changed(flash) && !diag_on && !msg && !clear_msg && !label_changed && !confirm_changed &&
+        !menu_changed) return;
     uint64_t t0 = plat_now_us();
     zx_render(frame_pixels, ZX_SCREEN_W, flash);
     if (diag_on) draw_diag(frame_pixels, ZX_SCREEN_W, 16, 16);
+    if (menu) menu_draw(frame_pixels);
     if (confirm_quit == 1) {
         static const char *const box[3] = {
             "                        ",
@@ -706,6 +829,31 @@ static void confirm_loop(void)
     plat_log("JSW: end game? %s\n", yes ? "yes" : "no");
 }
 
+/* A menu is open: hold the game still as for END GAME?, then wait until the
+ * buttons are let go so A never reaches the game as a jump. A room chosen
+ * is reached through the game's own teleport (as typing 9 and the room
+ * number does on a Spectrum), so Willy keeps his place on the screen. */
+static void menu_loop(void)
+{
+    static const int16_t silence[2 * 960];
+    while (menu) { audio_submit(silence, 960); poll_input(); present(); pace(); }
+    while (pad && (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH) ||
+                   SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_EAST) ||
+                   SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ||
+                   SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))) {
+        audio_submit(silence, 960); poll_input(); present(); pace();
+    }
+    menu_dirty = 1;
+    if (menu_teleport >= 0 && mem[JSW_TELEPORT] == CHEAT_DONE) {
+        plat_log("JSW: teleport to room %d\n", menu_teleport);
+        teleport_target = menu_teleport;
+        teleport_pending = 1;
+        teleport_frames = 0;
+    }
+    menu_teleport = -1;
+    plat_log("JSW SCREEN play%s\n", v128 ? "128" : "48");
+}
+
 static void frame_hook(void)
 {
     render_audio();
@@ -716,6 +864,7 @@ static void frame_hook(void)
         longjmp(chooser_jmp, 1);
     }
     if (confirm_quit) confirm_loop();
+    if (menu) menu_loop();
     if (audio_ok && frame_count > 50 && audio_queued_ms() < AUDIO_QUEUE_LOW_MS)
         diag_skipped++;
     else
