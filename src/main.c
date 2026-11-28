@@ -292,6 +292,15 @@ static const zx_keypos_t cheat_keys[] = {
 #define CHEAT_LEN  10
 #define CHEAT_DONE 10
 static int macro_step = -1, macro_timer;
+static int in_play;                     /* between STARTGAME and the title screen */
+
+/* Where the game accepts WRITETYPER: First Landing (room 28 in both
+ * versions), Willy on the floor at the foot of the stairs (y 208).
+ * Anywhere else the letters are only movement keys. */
+static int cheat_spot(void)
+{
+    return in_play && mem[JSW_ROOM] == 28 && mem[JSW_WILLY_Y] == 208;
+}
 
 /* Teleport: the two port reads after the game's teleport check are answered
  * with the target room (see the nxdk main.c). */
@@ -333,16 +342,26 @@ static void game_hook(uint16_t addr)
     switch (addr) {
     case JSW_TITLESCREEN:
         in_codes = 0;
+        in_play = 0;
         if (v128) jsw_in_title = 1;
         screen_shown(v128 ? "title128" : "title48");
         break;
     case JSW_STARTGAME:
         if (v128) jsw_in_title = 0;
+        in_play = 1;
         screen_shown(v128 ? "play128" : "play48");
         break;
-    case JSW_ENTERCODES:  if (!v128) { in_codes = 1; screen_shown("codes"); } break;
+    case JSW_ENTERCODES:  in_play = 0; if (!v128) { in_codes = 1; screen_shown("codes"); } break;
     case JSW_TELECHECK:   if (teleport_pending) teleport_armed = 1; break;
-    case JSW_MAINLOOP:    teleport_armed = 0; break;
+    case JSW_MAINLOOP:
+        teleport_armed = 0;
+        {
+            static int was_on;
+            int on = mem[JSW_TELEPORT] == CHEAT_DONE;
+            if (on && !was_on) plat_log("JSW: cheat on\n");
+            was_on = on;
+        }
+        break;
     default: break;
     }
 }
@@ -437,7 +456,8 @@ static void pad_button(int button, int down)
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:                /* Black */
         if (down) {
             if (mem[JSW_TELEPORT] != CHEAT_DONE) {
-                if (macro_step < 0) { macro_step = 0; macro_timer = 0; }
+                if (macro_step < 0 && cheat_spot()) { macro_step = 0; macro_timer = 0; }
+                else if (macro_step < 0) plat_log("JSW: cheat only works in First Landing at the foot of the stairs (room %d, y %d)\n", mem[JSW_ROOM], mem[JSW_WILLY_Y]);
             } else {
                 start_teleport(button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
             }
@@ -479,8 +499,11 @@ static void read_pad_axes(void)
     if (left)  joy |= 0x02;
     if (fire)  joy |= 0x10;
     zx_kempston = joy;
-    set_bit(pad_keys, ZX_ROW_P_Y, 1, left);              /* O / P resume a paused game */
-    set_bit(pad_keys, ZX_ROW_P_Y, 0, right);
+    /* O / P resume a paused game. Not while WRITETYPER is being typed:
+     * a stray O / P on the P-Y row resets the game's key counter. */
+    int typing = macro_step >= 0;
+    set_bit(pad_keys, ZX_ROW_P_Y, 1, left && !typing);
+    set_bit(pad_keys, ZX_ROW_P_Y, 0, right && !typing);
 }
 
 static void poll_input(void)
